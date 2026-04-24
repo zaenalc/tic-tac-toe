@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tic Tac Toe FIX FINAL + SOUND</title>
+
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+<style>
+body {
+  font-family: Arial;
+  text-align: center;
+  background: #0f172a;
+  color: white;
+}
+
+h1 { margin-bottom: 5px; }
+
+.scoreboard {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  margin-top: 10px;
+}
+
+.score {
+  background: #1e293b;
+  padding: 10px 20px;
+  border-radius: 10px;
+}
+
+#status {
+  margin-top: 15px;
+  font-size: 20px;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(3,100px);
+  gap: 10px;
+  justify-content: center;
+  margin-top: 25px;
+}
+
+.cell {
+  width: 100px;
+  height: 100px;
+  background: #1e293b;
+  border-radius: 12px;
+  font-size: 2em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.cell:hover { background:#334155; transform:scale(1.05); }
+
+.win { background:#22c55e !important; }
+</style>
+</head>
+
+<body>
+
+<h1>🎮 Tic Tac Toe</h1>
+
+<div class="scoreboard">
+  <div class="score">🟢 X: <span id="scoreX">0</span></div>
+  <div class="score">🔵 O: <span id="scoreO">0</span></div>
+  <div class="score">⚪ Draw: <span id="scoreD">0</span></div>
+</div>
+
+<div id="status">Connecting...</div>
+<div class="board" id="board"></div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "ISI_API_KEY_KAMU",
+  authDomain: "tictactoe-4365f.firebaseapp.com",
+  databaseURL: "https://tictactoe-4365f-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "tictactoe-4365f",
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+const room = "room1";
+const WIN_LIMIT = 5;
+
+let player = Math.random() > 0.5 ? "X" : "O";
+let currentTurn = "X";
+
+let gameOver = false;
+let scoreLocked = false;
+let localScoreSent = false;
+
+let lastBoardHash = "";
+
+const boardEl = document.getElementById("board");
+const statusText = document.getElementById("status");
+
+let cells = [];
+
+/* 🔊 SOUND SYSTEM (FIXED 100%) */
+let soundEnabled = false;
+
+const winSound = new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg");
+const loseSound = new Audio("https://actions.google.com/sounds/v1/cartoon/boing.ogg");
+const drawSound = new Audio("https://actions.google.com/sounds/v1/cartoon/pop.ogg");
+
+function unlockSound(){
+  [winSound, loseSound, drawSound].forEach(s=>{
+    s.volume = 1;
+    s.play().then(()=>s.pause()).catch(()=>{});
+    s.currentTime = 0;
+  });
+}
+
+/* INIT BOARD */
+function initBoard(){
+  boardEl.innerHTML = "";
+  cells = [];
+
+  for(let i=0;i<9;i++){
+    let c = document.createElement("div");
+    c.className = "cell";
+
+    c.onclick = ()=>{
+      if(!soundEnabled){
+        soundEnabled = true;
+        unlockSound(); // 🔥 FIX AUTOPLAY BLOCK
+      }
+      move(i);
+    };
+
+    boardEl.appendChild(c);
+    cells.push(c);
+  }
+}
+
+/* MOVE */
+function move(i){
+  if(gameOver || currentTurn !== player) return;
+
+  db.ref(room+"/game/board/"+i).once("value",snap=>{
+    if(snap.val()) return;
+
+    db.ref(room+"/game/board/"+i).set(player);
+    db.ref(room+"/game/turn").set(player==="X"?"O":"X");
+  });
+}
+
+/* TURN */
+db.ref(room+"/game/turn").on("value",snap=>{
+  currentTurn = snap.val() || "X";
+
+  if(gameOver || scoreLocked) return;
+
+  statusText.textContent = `You: ${player} | Turn: ${currentTurn}`;
+});
+
+/* BOARD */
+db.ref(room+"/game/board").on("value",snap=>{
+  let board = snap.val() || {};
+
+  let hash = JSON.stringify(board);
+  if(hash === lastBoardHash) return;
+  lastBoardHash = hash;
+
+  cells.forEach((c,i)=>{
+    c.textContent = board[i] || "";
+    c.classList.remove("win");
+  });
+
+  checkWin();
+});
+
+/* SCORE */
+db.ref(room+"/match").on("value",snap=>{
+  let m = snap.val();
+  if(!m) return;
+
+  let s = m.score || {X:0,O:0,D:0};
+
+  scoreLocked = m.scoreLocked || false;
+
+  document.getElementById("scoreX").textContent = s.X;
+  document.getElementById("scoreO").textContent = s.O;
+  document.getElementById("scoreD").textContent = s.D;
+});
+
+/* WIN CHECK */
+function checkWin(){
+  if(gameOver || scoreLocked || localScoreSent) return;
+
+  const p=[
+    [0,1,2],[3,4,5],[6,7,8],
+    [0,3,6],[1,4,7],[2,5,8],
+    [0,4,8],[2,4,6]
+  ];
+
+  for(let c of p){
+    let[a,b,d]=c;
+
+    if(
+      cells[a].textContent &&
+      cells[a].textContent===cells[b].textContent &&
+      cells[a].textContent===cells[d].textContent
+    ){
+      gameOver = true;
+      scoreLocked = true;
+      localScoreSent = true;
+
+      let w = cells[a].textContent;
+
+      cells[a].classList.add("win");
+      cells[b].classList.add("win");
+      cells[d].classList.add("win");
+
+      updateScore(w);
+
+      if(w === player){
+        statusText.textContent = "🎉 YOU WIN! 🏆 😄";
+        if(soundEnabled){
+          winSound.currentTime = 0;
+          winSound.play();
+        }
+      } else {
+        statusText.textContent = "😭 YOU LOSE! 😢";
+        if(soundEnabled){
+          loseSound.currentTime = 0;
+          loseSound.play();
+        }
+      }
+
+      setTimeout(resetGame,1000);
+      return;
+    }
+  }
+
+  checkDraw();
+}
+
+/* DRAW */
+function checkDraw(){
+  if(gameOver || scoreLocked || localScoreSent) return;
+
+  if(cells.every(c=>c.textContent!=="")){
+    gameOver = true;
+    scoreLocked = true;
+    localScoreSent = true;
+
+    statusText.textContent = "😐 DRAW!";
+
+    if(soundEnabled){
+      drawSound.currentTime = 0;
+      drawSound.play();
+    }
+
+    updateScore("D");
+
+    setTimeout(resetGame,1000);
+  }
+}
+
+/* RESET */
+function resetGame(){
+  setTimeout(()=>{
+    db.ref(room+"/game").set({
+      board:{},
+      turn:"X",
+      roundId:Date.now()
+    });
+
+    gameOver = false;
+    scoreLocked = false;
+    localScoreSent = false;
+
+    db.ref(room+"/match").update({
+      scoreLocked:false
+    });
+
+    statusText.textContent = `You: ${player} | Ready`;
+  },200);
+}
+
+/* SCORE UPDATE */
+function updateScore(result){
+  const roundId = Date.now();
+
+  db.ref(room+"/match").transaction(m=>{
+    if(!m){
+      m = {
+        score:{X:0,O:0,D:0},
+        lastRoundId:null,
+        scoreLocked:false
+      };
+    }
+
+    if(m.lastRoundId === roundId || m.scoreLocked){
+      return m;
+    }
+
+    m.lastRoundId = roundId;
+    m.scoreLocked = true;
+
+    let s = m.score;
+
+    if(result==="X") s.X++;
+    if(result==="O") s.O++;
+    if(result==="D") s.D++;
+
+    m.score = s;
+
+    if(s.X >= WIN_LIMIT || s.O >= WIN_LIMIT){
+      let w = s.X >= WIN_LIMIT ? "X" : "O";
+
+      statusText.textContent = `🏆 ${w} WIN MATCH!`;
+
+      setTimeout(()=>{
+        db.ref(room+"/match").set({
+          score:{X:0,O:0,D:0},
+          lastRoundId:null,
+          scoreLocked:false
+        });
+      },1500);
+    }
+
+    return m;
+  });
+  
+}
+
+/* START */
+initBoard();
+statusText.textContent = `You: ${player} | Click board to enable sound`;
+</script>
+
+</body>
+</html>
